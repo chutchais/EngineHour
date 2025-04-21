@@ -9,6 +9,10 @@
 #define SSD1306_NO_SPLASH 1
 #include <Adafruit_SSD1306.h>
 
+#include <BluetoothSerial.h>
+
+BluetoothSerial SerialBT;
+
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
@@ -286,62 +290,126 @@ void set_time(String input) {
   Serial.println("Time set.");
 }
 
-void show_time() {
+void show_time(Stream &out) {
   DateTime now = rtc.now();
-  Serial.printf("%04d/%02d/%02d %02d:%02d:%02d\n",
+  out.printf("%04d/%02d/%02d %02d:%02d:%02d\n",
                 now.year(), now.month(), now.day(),
                 now.hour(), now.minute(), now.second());
 }
 
-void handleSerialCommand(String cmd) {
+// void handleSerialCommand(String cmd) {
+//   if (cmd == "1") startEngine();
+//   else if (cmd == "0") stopEngine();
+//   else if (cmd == "hour") Serial.println(totalEngineHours, 2);
+//   else if (cmd.startsWith("sethour")) {
+//     totalEngineHours = cmd.substring(8).toFloat();
+//     EEPROM.put(ENGINE_HOURS_ADDR, totalEngineHours);
+//     EEPROM.commit();
+//     Serial.print("Set hour: "); Serial.println(totalEngineHours);
+//   }
+//   else if (cmd == "name") Serial.println(engine_name);
+//   else if (cmd.startsWith("setname")) writeName(cmd.substring(8, 18));
+//   else if (cmd == "cutoff") {
+//     Serial.printf("Shift1 cutoff: %02d\n", shift1Cutoff);
+//     Serial.printf("Shift2 cutoff: %02d\n", shift2Cutoff);
+//   }
+//   else if (cmd.startsWith("setcutoff1")) {
+//     shift1Cutoff = cmd.substring(11).toInt();
+//     EEPROM.write(SHIFT1_CUTOFF_ADDR, shift1Cutoff);
+//     EEPROM.commit();
+//     Serial.printf("Set shift1 cutoff: %02d\n", shift1Cutoff);
+//   }
+//   else if (cmd.startsWith("setcutoff2")) {
+//     shift2Cutoff = cmd.substring(11).toInt();
+//     EEPROM.write(SHIFT2_CUTOFF_ADDR, shift2Cutoff);
+//     EEPROM.commit();
+//     Serial.printf("Set shift2 cutoff: %02d\n", shift1Cutoff);
+//   }
+//   else if (cmd == "shifthour1") Serial.println(shift1Hours, 2);
+//   else if (cmd == "shifthour2") Serial.println(shift2Hours, 2);
+//   else if (cmd == "shiftname1") Serial.println(shift1Name);
+//   else if (cmd == "shiftname2") Serial.println(shift2Name);
+//   else if (cmd.startsWith("setshiftname1")) {
+//     shift1Name = cmd.substring(14, 24);
+//     writeShiftName(SHIFT1_NAME_ADDR, shift1Name);
+//     Serial.print("Set shift1 name: ");
+//     Serial.println(shift1Name);
+//   }
+//   else if (cmd.startsWith("setshiftname2")) {
+//     shift2Name = cmd.substring(14, 24);
+//     writeShiftName(SHIFT2_NAME_ADDR, shift2Name);
+//     Serial.print("Set shift2 name: ");
+//     Serial.println(shift2Name);
+//   }
+//   else if (cmd == "clear") clearEEPROM();
+//   else if (cmd == "time") show_time();
+//   else if (cmd.startsWith("settime")) set_time(cmd);
+//  else if (cmd == "interval") {
+//     Serial.printf("Current save interval: %lu seconds\n", SAVE_INTERVAL / 1000UL);
+//   }
+//   else if (cmd.startsWith("setinterval ")) {
+//     unsigned long sec = cmd.substring(12).toInt();
+//     if (sec > 0 && sec <= 86400) {
+//       SAVE_INTERVAL = sec * 1000UL;
+//       EEPROM.put(EEPROM_ADDR_INTERVAL, sec);
+//       EEPROM.commit();
+//       Serial.printf("Save interval set to: %lu seconds\n", sec);
+//     } else {
+//       Serial.println("Invalid value. Use 1–86400 seconds.");
+//     }
+//     }
+    
+//   }
+
+void handleSerialCommand(String cmd, Stream &src) {
   if (cmd == "1") startEngine();
   else if (cmd == "0") stopEngine();
-  else if (cmd == "hour") Serial.println(totalEngineHours, 2);
+  else if (cmd == "hour") src.println(totalEngineHours, 2);
   else if (cmd.startsWith("sethour")) {
     totalEngineHours = cmd.substring(8).toFloat();
     EEPROM.put(ENGINE_HOURS_ADDR, totalEngineHours);
     EEPROM.commit();
-    Serial.print("Set hour: "); Serial.println(totalEngineHours);
+    src.print("Set hour: "); src.println(totalEngineHours);
   }
-  else if (cmd == "name") Serial.println(engine_name);
+  else if (cmd == "name") src.println(engine_name);
   else if (cmd.startsWith("setname")) writeName(cmd.substring(8, 18));
   else if (cmd == "cutoff") {
-    Serial.printf("Shift1 cutoff: %02d\n", shift1Cutoff);
-    Serial.printf("Shift2 cutoff: %02d\n", shift2Cutoff);
+    src.printf("Shift1 cutoff: %02d\n", shift1Cutoff);
+    src.printf("Shift2 cutoff: %02d\n", shift2Cutoff);
   }
   else if (cmd.startsWith("setcutoff1")) {
     shift1Cutoff = cmd.substring(11).toInt();
     EEPROM.write(SHIFT1_CUTOFF_ADDR, shift1Cutoff);
     EEPROM.commit();
-    Serial.printf("Set shift1 cutoff: %02d\n", shift1Cutoff);
+    src.printf("Set shift1 cutoff: %02d\n", shift1Cutoff);
   }
   else if (cmd.startsWith("setcutoff2")) {
     shift2Cutoff = cmd.substring(11).toInt();
     EEPROM.write(SHIFT2_CUTOFF_ADDR, shift2Cutoff);
     EEPROM.commit();
-    Serial.printf("Set shift2 cutoff: %02d\n", shift1Cutoff);
+    src.printf("Set shift2 cutoff: %02d\n", shift2Cutoff);
   }
-  else if (cmd == "shifthour1") Serial.println(shift1Hours, 2);
-  else if (cmd == "shifthour2") Serial.println(shift2Hours, 2);
-  else if (cmd == "shiftname1") Serial.println(shift1Name);
-  else if (cmd == "shiftname2") Serial.println(shift2Name);
+  else if (cmd == "shifthour1") src.println(shift1Hours, 2);
+  else if (cmd == "shifthour2") src.println(shift2Hours, 2);
+  else if (cmd == "shiftname1") src.println(shift1Name);
+  else if (cmd == "shiftname2") src.println(shift2Name);
   else if (cmd.startsWith("setshiftname1")) {
     shift1Name = cmd.substring(14, 24);
     writeShiftName(SHIFT1_NAME_ADDR, shift1Name);
-    Serial.print("Set shift1 name: ");
-    Serial.println(shift1Name);
+    src.print("Set shift1 name: ");
+    src.println(shift1Name);
   }
   else if (cmd.startsWith("setshiftname2")) {
     shift2Name = cmd.substring(14, 24);
     writeShiftName(SHIFT2_NAME_ADDR, shift2Name);
-    Serial.print("Set shift2 name: ");
-    Serial.println(shift2Name);
+    src.print("Set shift2 name: ");
+    src.println(shift2Name);
   }
   else if (cmd == "clear") clearEEPROM();
-  else if (cmd == "time") show_time();
+  else if (cmd == "time") show_time(src);
   else if (cmd.startsWith("settime")) set_time(cmd);
- else if (cmd == "interval") {
-    Serial.printf("Current save interval: %lu seconds\n", SAVE_INTERVAL / 1000UL);
+  else if (cmd == "interval") {
+    src.printf("Current save interval: %lu seconds\n", SAVE_INTERVAL / 1000UL);
   }
   else if (cmd.startsWith("setinterval ")) {
     unsigned long sec = cmd.substring(12).toInt();
@@ -349,13 +417,13 @@ void handleSerialCommand(String cmd) {
       SAVE_INTERVAL = sec * 1000UL;
       EEPROM.put(EEPROM_ADDR_INTERVAL, sec);
       EEPROM.commit();
-      Serial.printf("Save interval set to: %lu seconds\n", sec);
+      src.printf("Save interval set to: %lu seconds\n", sec);
     } else {
-      Serial.println("Invalid value. Use 1–86400 seconds.");
+      src.println("Invalid value. Use 1–86400 seconds.");
     }
-    }
-    
   }
+}
+
 
   void setup() {
     Serial.begin(115200);
@@ -395,6 +463,10 @@ void handleSerialCommand(String cmd) {
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
+
+    // For Enable Bluetooth
+    SerialBT.begin(engine_name);  // Bluetooth name (visible on devices)
+    Serial.println("Bluetooth started! Waiting for connections...");
     
   }
 
@@ -434,6 +506,12 @@ void handleSerialCommand(String cmd) {
     if (Serial.available()) {
       String cmd = Serial.readStringUntil('\n');
       cmd.trim();
-      handleSerialCommand(cmd);
+      handleSerialCommand(cmd,Serial);
+    }
+    // To support Bluetooth
+    if (SerialBT.available()) {
+      String cmd = SerialBT.readStringUntil('\n');
+      cmd.trim();
+      handleSerialCommand(cmd,SerialBT);
     }
   }
