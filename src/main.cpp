@@ -10,6 +10,7 @@
 #include <Adafruit_SSD1306.h>
 
 #include <BluetoothSerial.h>
+#include <WiFi.h>
 
 BluetoothSerial SerialBT;
 
@@ -40,6 +41,8 @@ bool rtcAvailable = true;
 #define LAST_SHIFT1_RESET_DAY_ADDR 52  // 1 byte (day of last reset for shift 1)
 #define LAST_SHIFT2_RESET_DAY_ADDR 53  // 1 byte (day of last reset for shift 2)
 
+#define SSID_ADDR 60
+#define PASS_ADDR 110
 
 const int EEPROM_ADDR_INTERVAL = 51;
 unsigned long SAVE_INTERVAL = 10 * 60 * 1000UL; // Default 10 minutes
@@ -66,6 +69,60 @@ int lastShift1ResetDay = -1;
 int lastShift2ResetDay = -1;
 
 void saveEngineHours();  // ✅ Add this prototype
+
+void connectWiFi() {
+  char ssid[32], pass[32];
+  EEPROM.get(SSID_ADDR, ssid);
+  EEPROM.get(PASS_ADDR, pass);
+
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println("Connecting...");
+  display.println(ssid);
+  display.display();
+
+  WiFi.begin(ssid, pass);
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  display.clearDisplay();
+
+if (WiFi.status() == WL_CONNECTED) {
+  Serial.println("\n✅ WiFi connected!");
+
+  display.setTextSize(2);               // Large for status
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  display.println("WiFi OK");
+
+  display.setTextSize(1);               // Normal for details
+  display.setCursor(0, 20);
+  display.println(WiFi.SSID());
+  display.println(WiFi.localIP());
+} else {
+  Serial.println("\n❌ WiFi connection failed.");
+
+  display.setTextSize(2);
+  display.setCursor(0, 0);
+  display.println("WiFi Fail");
+
+  display.setTextSize(1);
+  display.setCursor(0, 20);
+  display.println("Check SSID/PW");
+}
+
+display.display();
+
+}
+
 
 void loadSaveInterval() {
   unsigned long intervalSec;
@@ -422,10 +479,51 @@ void handleSerialCommand(String cmd, Stream &src) {
       src.println("Invalid value. Use 1–86400 seconds.");
     }
   }
+  else if (cmd == "wifi") {
+    if (WiFi.status() == WL_CONNECTED) {
+      src.println("📶 SSID: " + WiFi.SSID());
+      src.println("🔗 Status: Connected");
+      src.println("🌐 IP: " + WiFi.localIP().toString());
+    } else {
+      src.println("📶 SSID: (not connected)");
+      src.println("🔗 Status: Not Connected");
+    }
+  } //end cmd.startsWith("wifi")
+  // 
+  else if (cmd.startsWith("setwifi")) {
+    int firstSpace = cmd.indexOf(' ');
+    int secondSpace = cmd.indexOf(' ', firstSpace + 1);
+    if (firstSpace != -1 && secondSpace != -1) {
+      String ssid = cmd.substring(firstSpace + 1, secondSpace);
+      String pass = cmd.substring(secondSpace + 1);
+      Serial.println("Saving WiFi credentials...");
+
+      char ssidBuf[32], passBuf[32];
+      ssid.toCharArray(ssidBuf, 32);
+      pass.toCharArray(passBuf, 32);
+
+      EEPROM.put(SSID_ADDR, ssidBuf);
+      EEPROM.put(PASS_ADDR, passBuf);
+      EEPROM.commit();
+
+      src.println("✅ Reconnecting...");
+      connectWiFi();
+    } else {
+      src.println("Usage: setwifi SSID PASSWORD");
+    }
+  }
+  // 
 }
 
 
   void setup() {
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+      Serial.println("SSD1306 OLED failed");
+      while (1);
+    }
+    display.clearDisplay();
+    display.display();
+
     Serial.begin(115200);
     Wire.begin();
   
@@ -433,7 +531,9 @@ void handleSerialCommand(String cmd, Stream &src) {
     pinMode(ENGINE_INPUT_PIN, INPUT_PULLUP);
   
     EEPROM.begin(EEPROM_SIZE);
-  
+    
+    connectWiFi();
+
     loadSaveInterval();
   
     if (!rtc.begin()) {
@@ -441,10 +541,7 @@ void handleSerialCommand(String cmd, Stream &src) {
       rtcAvailable = false;
     }
   
-    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-      Serial.println("SSD1306 OLED failed");
-      while (1);
-    }
+
   
     engine_name = readName();
     totalEngineHours = readFloat(ENGINE_HOURS_ADDR);
