@@ -24,6 +24,7 @@ bool rtcAvailable = true;
 
 #define ENGINE_INPUT_PIN 15
 #define LED_PIN 25
+#define DISPLAY_MODE_INPUT_PIN 12
 
 #define EEPROM_SIZE 512
 #define NAME_ADDR 0
@@ -43,6 +44,22 @@ bool rtcAvailable = true;
 
 #define SSID_ADDR 60
 #define PASS_ADDR 110
+
+// To support Move
+#define TOTAL_MOVE_ADDR	170
+#define SHIFT_MOVE1_ADDR	174
+#define SHIFT_MOVE2_ADDR	178
+#define MOVE_INPUT_PIN 14
+#define DEBOUNCE_DELAY_MS   50  // adjust if needed
+
+bool lastMoveButtonState = LOW;
+unsigned long lastDebounceTime = 0;
+bool moveButtonState = LOW;
+
+#define LED_FLASH_DURATION 200  // milliseconds
+bool flashActive = false;
+unsigned long flashStartTime = 0;
+// End move
 
 const int EEPROM_ADDR_INTERVAL = 51;
 unsigned long SAVE_INTERVAL = 10 * 60 * 1000UL; // Default 10 minutes
@@ -67,6 +84,12 @@ bool wasEngineRunning = false;
 
 int lastShift1ResetDay = -1;
 int lastShift2ResetDay = -1;
+
+// Move
+int totalMoves = 0;
+int shiftMove1 = 0;
+int shiftMove2 = 0;
+// End move
 
 void saveEngineHours();  // ✅ Add this prototype
 
@@ -202,7 +225,8 @@ void stopEngine() {
 
 
 
-
+// totalMoves++;
+// shiftMove1++; // assume shift 1 for now
 
 void handleShiftReset(DateTime now) {
   int currentHour = now.hour();
@@ -212,6 +236,10 @@ void handleShiftReset(DateTime now) {
   if (currentHour >= shift1Cutoff && lastShift1ResetDay != currentDay) {
     shift1Hours = 0;
     EEPROM.put(SHIFT1_HOUR_ADDR, shift1Hours);
+    // move
+    shiftMove1 = 0 ;
+    EEPROM.put(SHIFT_MOVE1_ADDR, shiftMove1);
+    // end move
     EEPROM.write(LAST_SHIFT1_RESET_DAY_ADDR, currentDay);
     EEPROM.commit();
     lastShift1ResetDay = currentDay;
@@ -221,58 +249,131 @@ void handleShiftReset(DateTime now) {
   if (currentHour >= shift2Cutoff && lastShift2ResetDay != currentDay) {
     shift2Hours = 0;
     EEPROM.put(SHIFT2_HOUR_ADDR, shift2Hours);
+    // move
+    shiftMove2 = 0 ;
+    EEPROM.put(SHIFT_MOVE2_ADDR, shiftMove2);
+    // end move
     EEPROM.write(LAST_SHIFT2_RESET_DAY_ADDR, currentDay);
     EEPROM.commit();
     lastShift2ResetDay = currentDay;
   }
 }
 
-void updateDisplay(DateTime now) {
-  display.clearDisplay();
+// void updateDisplay(DateTime now) {
+//   display.clearDisplay();
 
-  // Line 1: "Running" (if running) and engine name
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  if (engineRunning) display.print("Running");
-  display.setCursor(96, 0);
-  display.print(engine_name);
+//   // Line 1: "Running" (if running) and engine name
+//   display.setTextSize(1);
+//   display.setCursor(0, 0);
+//   if (engineRunning) display.print("Running");
+//   display.setCursor(96, 0);
+//   display.print(engine_name);
 
-  // Line 2: Big Total Hour in center
-  display.setTextSize(2);
-  char hourStr[12];
-  sprintf(hourStr, "%010.2f", totalEngineHours);
-  int16_t x1, y1; uint16_t w, h;
-  display.getTextBounds(hourStr, 0, 0, &x1, &y1, &w, &h);
-  display.setCursor(SCREEN_WIDTH - w, 25);
-  display.print(hourStr);
+//   // Line 2: Big Total Hour in center
+//   display.setTextSize(2);
+//   char hourStr[12];
+//   sprintf(hourStr, "%010.2f", totalEngineHours);
+//   int16_t x1, y1; uint16_t w, h;
+//   display.getTextBounds(hourStr, 0, 0, &x1, &y1, &w, &h);
+//   display.setCursor(SCREEN_WIDTH - w, 25);
+//   display.print(hourStr);
 
-  // Last line:
-  // Shift Hour (Big) + Time & Shift name (Small)
-  bool inShift1 = isInShift1(now.hour());
-  String shiftLabel = inShift1 ? shift1Name : shift2Name;
-  float currentShiftHour = inShift1 ? shift1Hours : shift2Hours;
+//   // Last line:
+//   // Shift Hour (Big) + Time & Shift name (Small)
+//   bool inShift1 = isInShift1(now.hour());
+//   String shiftLabel = inShift1 ? shift1Name : shift2Name;
+//   float currentShiftHour = inShift1 ? shift1Hours : shift2Hours;
 
-  // Show shift hour in big font
-  display.setTextSize(2);
-  char shiftHourStr[8];
-  sprintf(shiftHourStr, "%.2f", currentShiftHour);
-  display.setCursor(0, 48);
-  display.print(shiftHourStr);
-  display.print("h");
+//   // Show shift hour in big font
+//   display.setTextSize(2);
+//   char shiftHourStr[8];
+//   sprintf(shiftHourStr, "%.2f", currentShiftHour);
+//   display.setCursor(0, 48);
+//   display.print(shiftHourStr);
+//   display.print("h");
 
-  // Show time and shift name in small font
-  display.setTextSize(1);
-  char timeStr[10];
-  sprintf(timeStr, "%02d:%02d", now.hour(), now.minute());
-  display.setCursor(90, 54);  // adjust X for alignment if needed
-  // display.setCursor(65, 48);
-  display.print(timeStr);
-  // display.print(" ");
-  // display.print(shiftLabel);
+//   // Show time and shift name in small font
+//   display.setTextSize(1);
+//   char timeStr[10];
+//   sprintf(timeStr, "%02d:%02d", now.hour(), now.minute());
+//   display.setCursor(90, 54);  // adjust X for alignment if needed
+//   // display.setCursor(65, 48);
+//   display.print(timeStr);
+//   // display.print(" ");
+//   // display.print(shiftLabel);
 
-  display.display();
-}
+//   display.display();
+// }
 
+void updateDisplay(DateTime now,bool showHours) {
+    display.clearDisplay();
+  
+    // Line 1: "Running" (if running) and engine name
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    if (engineRunning) display.print("Running");
+    display.setCursor(96, 0);
+    display.print(engine_name);
+  
+    // Line 2: Big Total Hour in center
+    display.setTextSize(2);
+    // char hourStr[12];
+    // sprintf(hourStr, "%010.2f", totalEngineHours);
+    // int16_t x1, y1; uint16_t w, h;
+    // display.getTextBounds(hourStr, 0, 0, &x1, &y1, &w, &h);
+    // display.setCursor(SCREEN_WIDTH - w, 25);
+    // display.print(hourStr);
+    char mainStr[12];
+    int16_t x1, y1; uint16_t w, h;
+    if (showHours) {
+      sprintf(mainStr, "%010.2f", totalEngineHours);
+    } else {
+      sprintf(mainStr, "%10d", totalMoves); // pad total moves right-aligned
+    }
+    display.getTextBounds(mainStr, 0, 0, &x1, &y1, &w, &h);
+    display.setCursor(SCREEN_WIDTH - w, 25);
+    display.print(mainStr);
+
+  
+    // Last line:
+    // Shift Hour (Big) + Time & Shift name (Small)
+    bool inShift1 = isInShift1(now.hour());
+    String shiftLabel = inShift1 ? shift1Name : shift2Name;
+    // float currentShiftHour = inShift1 ? shift1Hours : shift2Hours;
+    float currentShiftValue = showHours
+    ? (inShift1 ? shift1Hours : shift2Hours)
+    : (inShift1 ? shiftMove1 : shiftMove2);
+  
+    // Show shift hour in big font
+    display.setTextSize(2);
+    // char shiftHourStr[8];
+    // sprintf(shiftHourStr, "%.2f", currentShiftHour);
+    // display.setCursor(0, 48);
+    // display.print(shiftHourStr);
+    // display.print("h");
+    char shiftValueStr[8];
+    if (showHours) {
+      sprintf(shiftValueStr, "%.2f", currentShiftValue);
+    } else {
+      sprintf(shiftValueStr, "%d", (int)currentShiftValue);
+    }
+
+    display.setCursor(0, 48);
+    display.print(shiftValueStr);
+    display.print(showHours ? " h" : " m");
+  
+    // Show time and shift name in small font
+    display.setTextSize(1);
+    char timeStr[10];
+    sprintf(timeStr, "%02d:%02d", now.hour(), now.minute());
+    display.setCursor(90, 54);  // adjust X for alignment if needed
+    // display.setCursor(65, 48);
+    display.print(timeStr);
+    // display.print(" ");
+    // display.print(shiftLabel);
+  
+    display.display();
+  }
 
 void blinkLED() {
   static unsigned long lastBlink = 0;
@@ -288,6 +389,12 @@ void saveEngineHours() {
   EEPROM.put(ENGINE_HOURS_ADDR, totalEngineHours);
   EEPROM.put(SHIFT1_HOUR_ADDR, shift1Hours);
   EEPROM.put(SHIFT2_HOUR_ADDR, shift2Hours);
+
+  // save move
+  EEPROM.put(TOTAL_MOVE_ADDR, totalMoves);
+  EEPROM.put(SHIFT_MOVE1_ADDR, shiftMove1);
+  EEPROM.put(SHIFT_MOVE2_ADDR, shiftMove2);
+
   EEPROM.commit();
 }
 
@@ -354,69 +461,18 @@ void show_time(Stream &out) {
                 now.hour(), now.minute(), now.second());
 }
 
-// void handleSerialCommand(String cmd) {
-//   if (cmd == "1") startEngine();
-//   else if (cmd == "0") stopEngine();
-//   else if (cmd == "hour") Serial.println(totalEngineHours, 2);
-//   else if (cmd.startsWith("sethour")) {
-//     totalEngineHours = cmd.substring(8).toFloat();
-//     EEPROM.put(ENGINE_HOURS_ADDR, totalEngineHours);
-//     EEPROM.commit();
-//     Serial.print("Set hour: "); Serial.println(totalEngineHours);
-//   }
-//   else if (cmd == "name") Serial.println(engine_name);
-//   else if (cmd.startsWith("setname")) writeName(cmd.substring(8, 18));
-//   else if (cmd == "cutoff") {
-//     Serial.printf("Shift1 cutoff: %02d\n", shift1Cutoff);
-//     Serial.printf("Shift2 cutoff: %02d\n", shift2Cutoff);
-//   }
-//   else if (cmd.startsWith("setcutoff1")) {
-//     shift1Cutoff = cmd.substring(11).toInt();
-//     EEPROM.write(SHIFT1_CUTOFF_ADDR, shift1Cutoff);
-//     EEPROM.commit();
-//     Serial.printf("Set shift1 cutoff: %02d\n", shift1Cutoff);
-//   }
-//   else if (cmd.startsWith("setcutoff2")) {
-//     shift2Cutoff = cmd.substring(11).toInt();
-//     EEPROM.write(SHIFT2_CUTOFF_ADDR, shift2Cutoff);
-//     EEPROM.commit();
-//     Serial.printf("Set shift2 cutoff: %02d\n", shift1Cutoff);
-//   }
-//   else if (cmd == "shifthour1") Serial.println(shift1Hours, 2);
-//   else if (cmd == "shifthour2") Serial.println(shift2Hours, 2);
-//   else if (cmd == "shiftname1") Serial.println(shift1Name);
-//   else if (cmd == "shiftname2") Serial.println(shift2Name);
-//   else if (cmd.startsWith("setshiftname1")) {
-//     shift1Name = cmd.substring(14, 24);
-//     writeShiftName(SHIFT1_NAME_ADDR, shift1Name);
-//     Serial.print("Set shift1 name: ");
-//     Serial.println(shift1Name);
-//   }
-//   else if (cmd.startsWith("setshiftname2")) {
-//     shift2Name = cmd.substring(14, 24);
-//     writeShiftName(SHIFT2_NAME_ADDR, shift2Name);
-//     Serial.print("Set shift2 name: ");
-//     Serial.println(shift2Name);
-//   }
-//   else if (cmd == "clear") clearEEPROM();
-//   else if (cmd == "time") show_time();
-//   else if (cmd.startsWith("settime")) set_time(cmd);
-//  else if (cmd == "interval") {
-//     Serial.printf("Current save interval: %lu seconds\n", SAVE_INTERVAL / 1000UL);
-//   }
-//   else if (cmd.startsWith("setinterval ")) {
-//     unsigned long sec = cmd.substring(12).toInt();
-//     if (sec > 0 && sec <= 86400) {
-//       SAVE_INTERVAL = sec * 1000UL;
-//       EEPROM.put(EEPROM_ADDR_INTERVAL, sec);
-//       EEPROM.commit();
-//       Serial.printf("Save interval set to: %lu seconds\n", sec);
-//     } else {
-//       Serial.println("Invalid value. Use 1–86400 seconds.");
-//     }
-//     }
-    
-//   }
+void saveMovesToEEPROM() {
+  EEPROM.put(TOTAL_MOVE_ADDR, totalMoves);
+  EEPROM.put(SHIFT_MOVE1_ADDR, shiftMove1);
+  EEPROM.put(SHIFT_MOVE2_ADDR, shiftMove2);
+  // Serial.print("Total move :");
+  // Serial.println(totalMoves);
+  // Serial.print("Shift1 move :");
+  // Serial.println(shiftMove1);
+  // Serial.print("Shift2 move :");
+  // Serial.println(shiftMove2);
+  EEPROM.commit();
+}
 
 void handleSerialCommand(String cmd, Stream &src) {
   if (cmd == "1") startEngine();
@@ -512,8 +568,32 @@ void handleSerialCommand(String cmd, Stream &src) {
       src.println("Usage: setwifi SSID PASSWORD");
     }
   }
-  // 
+  // MOve
+  else if (cmd == "move") {
+    Serial.printf("Total Move: %d\n", totalMoves);
+  } else if (cmd.startsWith("setmove ")) {
+    int newValue = cmd.substring(8).toInt();
+    totalMoves = newValue;
+    saveMovesToEEPROM();
+    src.println("Total move updated.");
+  } else if (cmd == "shiftmove1") {
+    src.printf("Shift 1 Move: %d\n", shiftMove1);
+  } else if (cmd.startsWith("setshiftmove1 ")) {
+    int newValue = cmd.substring(14).toInt();
+    shiftMove1 = newValue;
+    saveMovesToEEPROM();
+    src.println("Shift 1 move updated.");
+  } else if (cmd == "shiftmove2") {
+    src.printf("Shift 2 Move: %d\n", shiftMove2);
+  } else if (cmd.startsWith("setshiftmove2 ")) {
+    int newValue = cmd.substring(14).toInt();
+    shiftMove2 = newValue;
+    saveMovesToEEPROM();
+    src.println("Shift 2 move updated.");
+  }
+  //End move
 }
+
 
 
   void setup() {
@@ -526,9 +606,12 @@ void handleSerialCommand(String cmd, Stream &src) {
 
     Serial.begin(115200);
     Wire.begin();
-  
+    
+    // Set Port mode
     pinMode(LED_PIN, OUTPUT);
-    pinMode(ENGINE_INPUT_PIN, INPUT_PULLUP);
+    pinMode(ENGINE_INPUT_PIN, INPUT_PULLUP); //for Hour
+    pinMode(MOVE_INPUT_PIN, INPUT_PULLDOWN); //for move
+    pinMode(DISPLAY_MODE_INPUT_PIN,INPUT_PULLUP);//for Display mode UP=Hour,DOWN=Move
   
     EEPROM.begin(EEPROM_SIZE);
     
@@ -556,6 +639,11 @@ void handleSerialCommand(String cmd, Stream &src) {
     lastShift1ResetDay = EEPROM.read(LAST_SHIFT1_RESET_DAY_ADDR);//EEPROM.get(LAST_SHIFT1_RESET_DAY_ADDR, lastShift1ResetDay);
     lastShift2ResetDay = EEPROM.read(LAST_SHIFT2_RESET_DAY_ADDR);//EEPROM.get(LAST_SHIFT2_RESET_DAY_ADDR, lastShift2ResetDay);
   
+    // MOve
+    EEPROM.get(TOTAL_MOVE_ADDR, totalMoves);
+    EEPROM.get(SHIFT_MOVE1_ADDR, shiftMove1);
+    EEPROM.get(SHIFT_MOVE2_ADDR, shiftMove2);
+    // End move
   
     display.clearDisplay();
     display.setTextSize(1);
@@ -568,7 +656,7 @@ void handleSerialCommand(String cmd, Stream &src) {
   }
 
 
-  void loop() {
+void loop() {
     if (!rtcAvailable) {
       showMessage("No Clock");
       delay(1000);
@@ -577,6 +665,48 @@ void handleSerialCommand(String cmd, Stream &src) {
     DateTime now = rtc.now();
     handleShiftReset(now);
   
+    // Count move
+    // bool moveButton = digitalRead(MOVE_INPUT_PIN);
+    // if (moveButton == HIGH && lastMoveButtonState == LOW) {
+    //     totalMoves++;
+    //     uint8_t currentHour = rtc.now().hour();
+    //     if (isInShift1(currentHour)) shiftMove1 ++;
+    //     else if (isInShift2(currentHour)) shiftMove2 ++;
+    //     saveMovesToEEPROM();
+    //   }
+    // lastMoveButtonState = moveButton;
+    bool reading = digitalRead(MOVE_INPUT_PIN);
+    if (reading != lastMoveButtonState) {
+      lastDebounceTime = millis();  // reset debounce timer
+    }
+
+    if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY_MS) {
+      // if the button state has stabilized
+      if (reading != moveButtonState) {
+        moveButtonState = reading;
+  
+        if (moveButtonState == HIGH) {
+          totalMoves++;
+          uint8_t currentHour = rtc.now().hour();
+          if (isInShift1(currentHour)) shiftMove1 ++;
+          else if (isInShift2(currentHour)) shiftMove2 ++;
+          saveMovesToEEPROM();
+          // Serial.println("Move detected.");
+          // Start LED flash
+          digitalWrite(LED_PIN, HIGH);
+          flashActive = true;
+          flashStartTime = millis();
+        }
+      }
+    }
+    lastMoveButtonState = reading;
+
+    // Turn off LED after flash duration
+    if (flashActive && (millis() - flashStartTime >= LED_FLASH_DURATION)) {
+      digitalWrite(LED_PIN, LOW);
+      flashActive = false;
+    }
+    // End move
   
   
     bool engineSignal = digitalRead(ENGINE_INPUT_PIN) == LOW;
@@ -596,7 +726,7 @@ void handleSerialCommand(String cmd, Stream &src) {
     }
   
     if (millis() - lastDisplayUpdate >= DISPLAY_UPDATE_INTERVAL) {
-      updateDisplay(now);
+      updateDisplay(now,digitalRead(DISPLAY_MODE_INPUT_PIN));
       lastDisplayUpdate = millis();
     }
   
