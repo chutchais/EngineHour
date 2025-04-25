@@ -52,6 +52,12 @@ bool rtcAvailable = true;
 #define MOVE_INPUT_PIN 14
 #define DEBOUNCE_DELAY_MS   50  // adjust if needed
 
+// To support MTTQ server
+#define EEPROM_SERVER_ADDR   200
+#define MAX_SERVER_LEN       32
+String mqttServer = "192.168.1.100:1883"; // default
+// End MTTQ
+
 bool lastMoveButtonState = LOW;
 unsigned long lastDebounceTime = 0;
 bool moveButtonState = LOW;
@@ -92,6 +98,26 @@ int shiftMove2 = 0;
 // End move
 
 void saveEngineHours();  // ✅ Add this prototype
+
+void saveServerToEEPROM() {
+  for (int i = 0; i < MAX_SERVER_LEN; i++) {
+    if (i < mqttServer.length()) {
+      EEPROM.write(EEPROM_SERVER_ADDR + i, mqttServer[i]);
+    } else {
+      EEPROM.write(EEPROM_SERVER_ADDR + i, 0);
+    }
+  }
+  EEPROM.commit();
+}
+
+void loadServerFromEEPROM() {
+  char buf[MAX_SERVER_LEN + 1];
+  for (int i = 0; i < MAX_SERVER_LEN; i++) {
+    buf[i] = EEPROM.read(EEPROM_SERVER_ADDR + i);
+  }
+  buf[MAX_SERVER_LEN] = '\0';
+  mqttServer = String(buf);
+}
 
 void connectWiFi() {
   char ssid[32], pass[32];
@@ -535,7 +561,7 @@ void handleSerialCommand(String cmd, Stream &src) {
       src.println("Invalid value. Use 1–86400 seconds.");
     }
   }
-  else if (cmd == "wifi") {
+  else if (cmd == "ip") {
     if (WiFi.status() == WL_CONNECTED) {
       src.println("📶 SSID: " + WiFi.SSID());
       src.println("🔗 Status: Connected");
@@ -546,7 +572,7 @@ void handleSerialCommand(String cmd, Stream &src) {
     }
   } //end cmd.startsWith("wifi")
   // 
-  else if (cmd.startsWith("setwifi")) {
+  else if (cmd.startsWith("setip")) {
     int firstSpace = cmd.indexOf(' ');
     int secondSpace = cmd.indexOf(' ', firstSpace + 1);
     if (firstSpace != -1 && secondSpace != -1) {
@@ -567,7 +593,25 @@ void handleSerialCommand(String cmd, Stream &src) {
     } else {
       src.println("Usage: setwifi SSID PASSWORD");
     }
-  }
+  } else if (cmd == "wifi") {
+    src.println("Scanning Wi-Fi networks...");
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    delay(100);
+    int n = WiFi.scanNetworks();
+    if (n == 0) {
+      src.println("No networks found.");
+    } else {
+      src.printf("%d networks found:\n", n);
+      for (int i = 0; i < n; ++i) {
+        src.printf("%d: %s (%d dBm) %s\n", i + 1,
+          WiFi.SSID(i).c_str(),
+          WiFi.RSSI(i),
+          (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "Open" : "Secured");
+      }
+    }
+  } //ip
+  
   // MOve
   else if (cmd == "move") {
     src.printf("Total Move: %d\n", totalMoves);
@@ -592,6 +636,22 @@ void handleSerialCommand(String cmd, Stream &src) {
     src.println("Shift 2 move updated.");
   }
   //End move
+  else if (cmd == "server") {
+    src.print("MQTT Server: ");
+    src.println(mqttServer);
+  }
+  else if (cmd.startsWith("setserver ")) {
+    String newServer = cmd.substring(10);
+    if (newServer.length() < MAX_SERVER_LEN && newServer.indexOf(':') != -1) {
+      mqttServer = newServer;
+      saveServerToEEPROM();
+      src.print("MQTT Server set to: ");
+      src.println(mqttServer);
+    } else {
+      src.println("Invalid format. Use setserver <ip>:<port>");
+    }
+  }//end MTTQ
+  
 }
 
 
@@ -653,6 +713,8 @@ void handleSerialCommand(String cmd, Stream &src) {
     SerialBT.begin(engine_name);  // Bluetooth name (visible on devices)
     Serial.println("Bluetooth started! Waiting for connections...");
     
+    // for MTTQ
+    loadServerFromEEPROM();
   }
 
 
