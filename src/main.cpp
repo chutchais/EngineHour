@@ -552,7 +552,7 @@ void handleSerialCommand(String cmd, Stream &src) {
     if (firstSpace != -1 && secondSpace != -1) {
       String ssid = cmd.substring(firstSpace + 1, secondSpace);
       String pass = cmd.substring(secondSpace + 1);
-      Serial.println("Saving WiFi credentials...");
+      src.println("Saving WiFi credentials...");
 
       char ssidBuf[32], passBuf[32];
       ssid.toCharArray(ssidBuf, 32);
@@ -570,7 +570,7 @@ void handleSerialCommand(String cmd, Stream &src) {
   }
   // MOve
   else if (cmd == "move") {
-    Serial.printf("Total Move: %d\n", totalMoves);
+    src.printf("Total Move: %d\n", totalMoves);
   } else if (cmd.startsWith("setmove ")) {
     int newValue = cmd.substring(8).toInt();
     totalMoves = newValue;
