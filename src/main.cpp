@@ -97,6 +97,9 @@ int shiftMove1 = 0;
 int shiftMove2 = 0;
 // End move
 
+int lastShiftIndex = -1;
+
+
 void saveEngineHours();  // ✅ Add this prototype
 
 void saveServerToEEPROM() {
@@ -118,6 +121,8 @@ void loadServerFromEEPROM() {
   buf[MAX_SERVER_LEN] = '\0';
   mqttServer = String(buf);
 }
+
+
 
 void connectWiFi() {
   char ssid[32], pass[32];
@@ -254,82 +259,65 @@ void stopEngine() {
 // totalMoves++;
 // shiftMove1++; // assume shift 1 for now
 
+// Comment on May 1,2025 -- current shift hour did not reset to zero.
+// void handleShiftReset(DateTime now) {
+//   int currentHour = now.hour();
+//   int currentDay = now.day();
+
+//   // --- Shift 1 ---
+//   if (currentHour >= shift1Cutoff && lastShift1ResetDay != currentDay) {
+//     shift1Hours = 0;
+//     EEPROM.put(SHIFT1_HOUR_ADDR, shift1Hours);
+//     // move
+//     shiftMove1 = 0 ;
+//     EEPROM.put(SHIFT_MOVE1_ADDR, shiftMove1);
+//     // end move
+//     EEPROM.write(LAST_SHIFT1_RESET_DAY_ADDR, currentDay);
+//     EEPROM.commit();
+//     lastShift1ResetDay = currentDay;
+//   }
+
+//   // --- Shift 2 ---
+//   if (currentHour >= shift2Cutoff && lastShift2ResetDay != currentDay) {
+//     shift2Hours = 0;
+//     EEPROM.put(SHIFT2_HOUR_ADDR, shift2Hours);
+//     // move
+//     shiftMove2 = 0 ;
+//     EEPROM.put(SHIFT_MOVE2_ADDR, shiftMove2);
+//     // end move
+//     EEPROM.write(LAST_SHIFT2_RESET_DAY_ADDR, currentDay);
+//     EEPROM.commit();
+//     lastShift2ResetDay = currentDay;
+//   }
+// }
+
 void handleShiftReset(DateTime now) {
   int currentHour = now.hour();
-  int currentDay = now.day();
+  int currentShiftIndex = isInShift1(currentHour) ? 1 : 2;
 
-  // --- Shift 1 ---
-  if (currentHour >= shift1Cutoff && lastShift1ResetDay != currentDay) {
-    shift1Hours = 0;
-    EEPROM.put(SHIFT1_HOUR_ADDR, shift1Hours);
-    // move
-    shiftMove1 = 0 ;
-    EEPROM.put(SHIFT_MOVE1_ADDR, shiftMove1);
-    // end move
-    EEPROM.write(LAST_SHIFT1_RESET_DAY_ADDR, currentDay);
-    EEPROM.commit();
-    lastShift1ResetDay = currentDay;
+  // On first run
+  if (lastShiftIndex == -1) {
+    lastShiftIndex = currentShiftIndex;
+    return;
   }
 
-  // --- Shift 2 ---
-  if (currentHour >= shift2Cutoff && lastShift2ResetDay != currentDay) {
-    shift2Hours = 0;
-    EEPROM.put(SHIFT2_HOUR_ADDR, shift2Hours);
-    // move
-    shiftMove2 = 0 ;
-    EEPROM.put(SHIFT_MOVE2_ADDR, shiftMove2);
-    // end move
-    EEPROM.write(LAST_SHIFT2_RESET_DAY_ADDR, currentDay);
+  // Detect transition between shifts
+  if (currentShiftIndex != lastShiftIndex) {
+    if (currentShiftIndex == 1) {
+      shift1Hours = 0;
+      EEPROM.put(SHIFT1_HOUR_ADDR, shift1Hours);
+      shiftMove1 = 0;
+      EEPROM.put(SHIFT_MOVE1_ADDR, shiftMove1);
+    } else {
+      shift2Hours = 0;
+      EEPROM.put(SHIFT2_HOUR_ADDR, shift2Hours);
+      shiftMove2 = 0;
+      EEPROM.put(SHIFT_MOVE2_ADDR, shiftMove2);
+    }
     EEPROM.commit();
-    lastShift2ResetDay = currentDay;
+    lastShiftIndex = currentShiftIndex;
   }
 }
-
-// void updateDisplay(DateTime now) {
-//   display.clearDisplay();
-
-//   // Line 1: "Running" (if running) and engine name
-//   display.setTextSize(1);
-//   display.setCursor(0, 0);
-//   if (engineRunning) display.print("Running");
-//   display.setCursor(96, 0);
-//   display.print(engine_name);
-
-//   // Line 2: Big Total Hour in center
-//   display.setTextSize(2);
-//   char hourStr[12];
-//   sprintf(hourStr, "%010.2f", totalEngineHours);
-//   int16_t x1, y1; uint16_t w, h;
-//   display.getTextBounds(hourStr, 0, 0, &x1, &y1, &w, &h);
-//   display.setCursor(SCREEN_WIDTH - w, 25);
-//   display.print(hourStr);
-
-//   // Last line:
-//   // Shift Hour (Big) + Time & Shift name (Small)
-//   bool inShift1 = isInShift1(now.hour());
-//   String shiftLabel = inShift1 ? shift1Name : shift2Name;
-//   float currentShiftHour = inShift1 ? shift1Hours : shift2Hours;
-
-//   // Show shift hour in big font
-//   display.setTextSize(2);
-//   char shiftHourStr[8];
-//   sprintf(shiftHourStr, "%.2f", currentShiftHour);
-//   display.setCursor(0, 48);
-//   display.print(shiftHourStr);
-//   display.print("h");
-
-//   // Show time and shift name in small font
-//   display.setTextSize(1);
-//   char timeStr[10];
-//   sprintf(timeStr, "%02d:%02d", now.hour(), now.minute());
-//   display.setCursor(90, 54);  // adjust X for alignment if needed
-//   // display.setCursor(65, 48);
-//   display.print(timeStr);
-//   // display.print(" ");
-//   // display.print(shiftLabel);
-
-//   display.display();
-// }
 
 void updateDisplay(DateTime now,bool showHours) {
     display.clearDisplay();
@@ -386,7 +374,7 @@ void updateDisplay(DateTime now,bool showHours) {
 
     display.setCursor(0, 48);
     display.print(shiftValueStr);
-    display.print(showHours ? " h" : " m");
+    display.print(showHours ? "h" : " m");
   
     // Show time and shift name in small font
     display.setTextSize(1);
@@ -726,6 +714,8 @@ void loop() {
     }
     DateTime now = rtc.now();
     handleShiftReset(now);
+
+    // checkShiftTransition(now);
   
     // Count move
     // bool moveButton = digitalRead(MOVE_INPUT_PIN);
