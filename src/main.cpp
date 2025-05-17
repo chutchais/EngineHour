@@ -12,6 +12,11 @@
 #include <BluetoothSerial.h>
 #include <WiFi.h>
 
+// May 1,2025 -- To support MQTT server
+#include <PubSubClient.h>
+// #include <ArduinoJson.h>
+
+
 BluetoothSerial SerialBT;
 
 #define SCREEN_WIDTH 128
@@ -99,6 +104,16 @@ int shiftMove2 = 0;
 
 int lastShiftIndex = -1;
 
+
+// Start MTTQ
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);  // <-- declare here
+const char* mqttIp = "127.0.0.1";
+const int mqttPort = 1883;
+
+unsigned long lastMQTTSendTime = 0;
+unsigned long mqttSendInterval = 5*60*1000; // default 5 minutes
+// End MTTQ
 
 void saveEngineHours();  // ✅ Add this prototype
 
@@ -254,6 +269,47 @@ void stopEngine() {
   }
 }
 
+  bool testAndReconnectMQTT(const char* clientId) {
+  if (mqttClient.connected()) {
+    return true;  // Already connected
+  }
+
+  Serial.print("Connecting to MQTT with client ID: ");
+  Serial.println(clientId);
+
+  int colIndex = mqttServer.indexOf(':');
+  String ipStr = mqttServer.substring(0, colIndex);      // e.g., "192.168.1.100"
+  int port = mqttServer.substring(colIndex + 1).toInt(); // e.g., 1883
+  mqttClient.setServer(ipStr.c_str(), port);
+
+  // Serial.print("MQTT address: ");
+  // Serial.println(ipStr);
+  // Serial.println(":");
+  // Serial.println(port);
+
+  bool connected = mqttClient.connect(clientId, "telematic", "lcb12025");
+
+  if (connected) {
+    Serial.println("MQTT connection successful.");
+  } else {
+    Serial.print("MQTT connection failed, rc=");
+    Serial.println(mqttClient.state());  // Debug reason code
+  }
+
+  return connected;
+}
+
+// bool testMQTTConnection(const char* ip, int port) {
+//   if (testAndReconnectMQTT(engine_name.c_str())){
+//       Serial.println("✅ MQTT connection successful.");
+//       mqttClient.disconnect();  // Disconnect after test
+//       return true;
+//   }else{
+//     Serial.print("❌ MQTT connection failed. Error code: ");
+//     Serial.println(mqttClient.state());
+//     return false;
+//   }
+// }
 
 
 // totalMoves++;
@@ -293,6 +349,7 @@ void stopEngine() {
 
 void handleShiftReset(DateTime now) {
   int currentHour = now.hour();
+  int currentDay = now.day();
   int currentShiftIndex = isInShift1(currentHour) ? 1 : 2;
 
   // On first run
@@ -488,6 +545,19 @@ void saveMovesToEEPROM() {
   EEPROM.commit();
 }
 
+void connectToMQTT() {
+  if (!mqttClient.connected()) {
+    Serial.print("Connecting to MQTT...");
+    if (mqttClient.connect(engine_name.c_str(),"telematic","lcb12025")) {
+      Serial.println("connected");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" try again in 5 seconds");
+    }
+  }
+}
+
 void handleSerialCommand(String cmd, Stream &src) {
   if (cmd == "1") startEngine();
   else if (cmd == "0") stopEngine();
@@ -624,25 +694,70 @@ void handleSerialCommand(String cmd, Stream &src) {
     src.println("Shift 2 move updated.");
   }
   //End move
-  else if (cmd == "server") {
+  else if (cmd == "mqtt") {
     src.print("MQTT Server: ");
     src.println(mqttServer);
+    bool result = testAndReconnectMQTT(engine_name.c_str());
+    src.println(result ? "✅ MQTT Connected" : "MQTT connection failed");
   }
-  else if (cmd.startsWith("setserver ")) {
-    String newServer = cmd.substring(10);
+  else if (cmd.startsWith("setmqtt ")) {
+    String newServer = cmd.substring(8);
     if (newServer.length() < MAX_SERVER_LEN && newServer.indexOf(':') != -1) {
       mqttServer = newServer;
       saveServerToEEPROM();
       src.print("MQTT Server set to: ");
       src.println(mqttServer);
+      bool result = testAndReconnectMQTT(engine_name.c_str());
+      src.println(result ? "✅ MQTT Connected" : "MQTT connection failed");
     } else {
       src.println("Invalid format. Use setserver <ip>:<port>");
     }
   }//end MTTQ
+  else if (cmd == "mqttinterval") {
+    src.print("MQTT Interval (sec): ");
+    src.println(mqttSendInterval/1000);
+  } else if (cmd.startsWith("setmqttinterval ")) {
+    String param = cmd.substring(16);
+    mqttSendInterval = param.toInt() * 1000UL;
+    src.print("MQTT Interval set to ");
+    src.print(mqttSendInterval/1000);
+    src.println(" sec");
+  } else if (cmd == "testmqtt") {
+    int colIndex = mqttServer.indexOf(':');
+    if (colIndex > 0) {
+      bool result = testAndReconnectMQTT(engine_name.c_str());
+      src.println(result ? "MQTT test passed" : "MQTT test failed");
+    } else {
+      src.println("Invalid MQTT server format. Use <ip>:<port>");
+    }
+  }
+  
   
 }
 
 
+
+
+void sendDataToMQTT(const char* topic, const char* payload) {
+  int colIndex = mqttServer.indexOf(':');
+  String ipStr = mqttServer.substring(0, colIndex);      // e.g., "192.168.1.100"
+  int port = mqttServer.substring(colIndex + 1).toInt(); // e.g., 1883
+
+  if (testAndReconnectMQTT(engine_name.c_str())) {
+    bool success = mqttClient.publish(topic, payload);
+    if (success) {
+      Serial.print("MQTT publish success: ");
+    } else {
+      Serial.print("MQTT publish failed: ");
+    }
+    Serial.print("topic=");
+    Serial.print(topic);
+    Serial.print(" payload=");
+    Serial.println(payload);
+  } else {
+    Serial.println("MQTT connection failed. Publish skipped.");
+  }
+}
 
   void setup() {
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
@@ -703,6 +818,16 @@ void handleSerialCommand(String cmd, Stream &src) {
     
     // for MTTQ
     loadServerFromEEPROM();
+
+    WiFiClient espClient;
+    PubSubClient mqttClient(espClient);
+    // Stored MQTT server info
+    int commaIndex = mqttServer.indexOf(':');
+    // char mqttIp[32] = "192.168.1.101";//mqttServer.substring(0,commaIndex).toChar();
+    // int mqttPort = 1883;//mqttServer.substring(commaIndex).toInt();
+    // mqttServer
+    mqttClient.setServer(mqttIp, mqttPort);
+    
   }
 
 
@@ -712,6 +837,9 @@ void loop() {
       delay(1000);
       return;
     }
+
+      
+
     DateTime now = rtc.now();
     handleShiftReset(now);
 
@@ -727,6 +855,7 @@ void loop() {
     //     saveMovesToEEPROM();
     //   }
     // lastMoveButtonState = moveButton;
+
     bool reading = digitalRead(MOVE_INPUT_PIN);
     if (reading != lastMoveButtonState) {
       lastDebounceTime = millis();  // reset debounce timer
@@ -793,4 +922,29 @@ void loop() {
       cmd.trim();
       handleSerialCommand(cmd,SerialBT);
     }
+
+    // Non-blocking MQTT send
+    if (millis() - lastMQTTSendTime >= mqttSendInterval) {
+      if (WiFi.status() == WL_CONNECTED) {
+        // Send Engine Total Hour
+        char payload_totalhour[16];
+        dtostrf(totalEngineHours, 1, 2, payload_totalhour);  // width=1, precision=2
+        sendDataToMQTT("engine/hour",payload_totalhour);
+
+        // Send Engine Total Move
+        char payload_totalmove[12]; // Enough for int range
+        itoa(totalMoves, payload_totalmove, 10);  // base 10
+        sendDataToMQTT("engine/move",payload_totalmove);
+
+      } else {
+        // Optional: Retry MQTT connection here (or just skip)
+        Serial.println("MQTT/WiFi unavailable. Skipping send.");
+      }
+      lastMQTTSendTime = millis();
+    }
+
+    mqttClient.loop();  // Safe to call even if not connected
+
   }
+
+  // && mqttClient.connected()
