@@ -115,8 +115,13 @@ unsigned long lastMQTTSendTime = 0;
 unsigned long mqttSendInterval = 5*60*1000; // default 5 minutes
 // End MTTQ
 
-bool alertDisplay = false;
+bool alertDisplay = false; //Show Normal mode(Engine hour) or Alert mode (check engine,Batt,PM)
 int engine_check = 0; //IN case found Check Engine alram set to 1
+
+String alertMsg = "";
+bool isPm = false;
+bool isCheckEngine = false;
+bool isChargeFail = false;
 
 // Alert image
 const uint8_t image_check_engine[] PROGMEM = {
@@ -1038,12 +1043,12 @@ void handleSerialCommand(String cmd, Stream &src) {
       src.println("Invalid MQTT server format. Use <ip>:<port>");
     }
   } else if (cmd.startsWith("pm ")){
+    isPm = false;
+    alertMsg = "";
     String msg = cmd.substring(3);
     if (msg.length() > 1){
-        alertDisplay = true;
-        showAlertScreen(image_oil_change,msg.c_str());
-    } else {
-        alertDisplay = false;
+        isPm = true;
+        alertMsg = msg;
     }
   }
   
@@ -1135,16 +1140,27 @@ void loop() {
     handleShiftReset(now);
 
     // Check Engine alarm
-    bool check_engine = digitalRead(CHECK_ENGINE_INPUT_PIN);
-    if (check_engine){
+    bool isCheckEngine = digitalRead(CHECK_ENGINE_INPUT_PIN);
+    engine_check = isCheckEngine ? 1 : 0; //to send to MQTT
+
+
+    // If fou d any problem , Display will change to Alert mode
+    if(isCheckEngine || isPm || isChargeFail){
       alertDisplay = true;
-      engine_check = 1 ;
-      showAlertScreen(image_check_engine,"CHECK ENGINE");
-    } else{
+    }else{
       alertDisplay = false;
-      engine_check =  0 ;
+    }
+
+    if (isCheckEngine){
+      showAlertScreen(image_check_engine,"CHECK ENGINE");
+    }
+    if (isPm){
+      showAlertScreen(image_oil_change,alertMsg.c_str());
     }
     // End Check engine alarm
+
+
+
 
     // Count Move
     bool reading = digitalRead(MOVE_INPUT_PIN);
