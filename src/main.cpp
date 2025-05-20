@@ -137,6 +137,13 @@ unsigned long lastDebounceTime = 0;     // For debouncing
 unsigned long highStartTime = 0;        // When HIGH state started
 bool highStable = false;                // Track if HIGH was stable long enough
 
+
+// Added on May 20,2025 -- To fix large number of Hour (long)
+#define EEPROM_ADDR_TOTAL_MINUTES 310  // Use 4 bytes for unsigned long
+unsigned long totalEngineMinutes = 0; // stores total runtime in minutes
+unsigned long lastMinuteUpdate = 0;
+
+
 // Alert image
 const uint8_t image_check_engine[] PROGMEM = {
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
@@ -549,6 +556,16 @@ const uint8_t image_company[] PROGMEM = {
 
 void saveEngineHours();  // ✅ Add this prototype
 
+// Added on May 20,2025 -- To fix large of Hour
+void saveMinutesToEEPROM() {
+  EEPROM.put(EEPROM_ADDR_TOTAL_MINUTES, totalEngineMinutes);
+  EEPROM.commit();
+}
+void loadMinutesFromEEPROM() {
+  EEPROM.get(EEPROM_ADDR_TOTAL_MINUTES, totalEngineMinutes);
+}
+// ---------------------------------------
+
 void saveMinActiveMs() {
   EEPROM.put(EEPROM_MIN_ACTIVE_ADDR, minActiveMs);
   EEPROM.commit();
@@ -653,17 +670,29 @@ bool isInShift1(uint8_t hour) {
 bool isInShift2(uint8_t hour) {
   return (hour < shift1Cutoff || hour >= shift2Cutoff);
 }
+
 void updateEngineHours() {
   unsigned long currentTime = rtc.now().unixtime();
   unsigned long elapsed = currentTime - engineStartTime;
+  
   if (elapsed >= 1) {
     float hours = elapsed / 3600.0;
     totalEngineHours += hours;
+    totalEngineMinutes = totalEngineHours*60;
     uint8_t currentHour = rtc.now().hour();
     if (isInShift1(currentHour)) shift1Hours += hours;
     else if (isInShift2(currentHour)) shift2Hours += hours;
     engineStartTime = currentTime;
   }
+  // // Added on May 20,2025 - For minute
+  // if (millis() - lastMinuteUpdate >= 60000) {  // every minute
+  //     totalEngineMinutes++;                     // count in minutes
+  //     totalEngineHours = totalEngineMinutes/60;
+  //     lastMinuteUpdate = millis();
+  //     Serial1.print(totalEngineMinutes);
+  //     Serial1.print(totalEngineHours);
+  //     engineStartTime = currentTime;
+  // }
 }
 
 void startEngine() {
@@ -674,7 +703,7 @@ void startEngine() {
 
 void stopEngine() {
   if (engineRunning) {
-    updateEngineHours();
+    // updateEngineHours();
     saveEngineHours();
     engineRunning = false;
     digitalWrite(LED_PIN, HIGH);
@@ -778,7 +807,7 @@ void sendDataToMQTT(const char* topic, const char* payload) {
 void publish_data(){
           // Send Engine Total Hour
         char payload_totalhour[16];
-        dtostrf(totalEngineHours, 1, 2, payload_totalhour);  // width=1, precision=2
+        dtostrf(totalEngineMinutes/60.0, 1, 2, payload_totalhour);  // width=1, precision=2
         String topic_hour = "engine/" + engine_name + "/hour";
         sendDataToMQTT(topic_hour.c_str(),payload_totalhour);
 
@@ -894,7 +923,8 @@ void updateDisplay(DateTime now,bool showNormalDisplay) {
     char mainStr[12];
     int16_t x1, y1; uint16_t w, h;
     // if (true) {
-      sprintf(mainStr, "%010.2f", totalEngineHours);
+      // sprintf(mainStr, "%010.2f", totalEngineHours);
+      sprintf(mainStr, "%010.2f", totalEngineMinutes/60.0);
     // } else {
     //   sprintf(mainStr, "%10d", totalMoves); // pad total moves right-aligned
     // }
@@ -965,6 +995,9 @@ void saveEngineHours() {
   EEPROM.put(SHIFT_MOVE1_ADDR, shiftMove1);
   EEPROM.put(SHIFT_MOVE2_ADDR, shiftMove2);
 
+  // Added May 20,2025
+  EEPROM.put(EEPROM_ADDR_TOTAL_MINUTES, totalEngineMinutes);
+
   EEPROM.commit();
 }
 
@@ -1008,6 +1041,8 @@ void clearEEPROM() {
   for (int i = 0; i < EEPROM_SIZE; i++) EEPROM.write(i, 0xFF);
   EEPROM.commit();
   totalEngineHours = 0;
+  totalEngineMinutes = 0;
+  totalMoves = 0;
   // dailyEngineHours = 0;
   Serial.println("EEPROM cleared and hours reset");
 }
@@ -1060,12 +1095,23 @@ void connectToMQTT() {
 void handleSerialCommand(String cmd, Stream &src) {
   if (cmd == "1") startEngine();
   else if (cmd == "0") stopEngine();
-  else if (cmd == "hour") src.println(totalEngineHours, 2);
+  else if (cmd == "hour") src.println(totalEngineMinutes/60.0, 2);
   else if (cmd.startsWith("sethour")) {
-    totalEngineHours = cmd.substring(8).toFloat();
-    EEPROM.put(ENGINE_HOURS_ADDR, totalEngineHours);
-    EEPROM.commit();
-    src.print("Set hour: "); src.println(totalEngineHours);
+    // totalEngineHours = cmd.substring(8).toFloat();
+    // EEPROM.put(ENGINE_HOURS_ADDR, totalEngineHours);
+    // totalEngineMinutes = totalEngineHours * 60; 
+    // EEPROM.get(EEPROM_ADDR_TOTAL_MINUTES, totalEngineMinutes);
+    // EEPROM.commit();
+    // src.print("Set hour: "); src.println(totalEngineMinutes/60.0, 2);
+      totalEngineHours = cmd.substring(8).toFloat();
+      totalEngineMinutes = totalEngineHours * 60;
+
+      EEPROM.put(ENGINE_HOURS_ADDR, totalEngineHours);
+      EEPROM.put(EEPROM_ADDR_TOTAL_MINUTES, totalEngineMinutes);  // fix this line
+      EEPROM.commit();
+
+      src.print("Set hour: ");
+      src.println(totalEngineMinutes / 60.0, 2);
   }
   else if (cmd == "name") src.println(engine_name);
   else if (cmd.startsWith("setname")) writeName(cmd.substring(8, 18));
@@ -1171,7 +1217,7 @@ void handleSerialCommand(String cmd, Stream &src) {
   
   // MOve
   else if (cmd == "move") {
-    src.printf("Total Move: %d\n", totalMoves);
+    src.printf("%d", totalMoves);
   } else if (cmd.startsWith("setmove ")) {
     int newValue = cmd.substring(8).toInt();
     totalMoves = newValue;
@@ -1311,6 +1357,10 @@ void handleSerialCommand(String cmd, Stream &src) {
     EEPROM.get(SHIFT_MOVE2_ADDR, shiftMove2);
     // End move
   
+    // Added May 20,2025 -- To fix large of Hour
+    loadMinutesFromEEPROM();
+    lastMinuteUpdate = millis();
+
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
@@ -1417,6 +1467,15 @@ void loop() {
       showAlertScreen(image_move_up,"LIFTING");
     }
     
+    // Added on May 20,2025 -- Counting in minute
+    if (engineRunning && millis() - lastMinuteUpdate >= 60000) {
+      totalEngineMinutes++;
+      totalEngineHours = totalEngineMinutes /60.0;
+      // saveMinutesToEEPROM();
+      Serial.println("Minute logged: " + String(totalEngineMinutes));
+      lastMinuteUpdate = millis();  // Reset timer
+    }
+
     // Standard display
     updateDisplay(now,!alertDisplay);
   
@@ -1429,7 +1488,7 @@ void loop() {
   
     if (engineRunning) {
       blinkLED();
-      updateEngineHours();
+      // updateEngineHours();
       if (millis() - lastSaveTime >= SAVE_INTERVAL) {
         saveEngineHours();
         lastSaveTime = millis();
