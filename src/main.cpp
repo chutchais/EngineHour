@@ -909,6 +909,12 @@ void updateDisplay(DateTime now,bool showNormalDisplay) {
     display.setTextSize(1);
     display.setCursor(0, 0);
     if (engineRunning) display.print("Running");
+
+    char timeStr[10];
+    sprintf(timeStr, "%02d:%02d", now.hour(), now.minute());
+    display.setCursor(55, 0);  // adjust X for alignment if needed
+    display.print(timeStr);
+
     display.setCursor(96, 0);
     display.print(engine_name);
   
@@ -1408,11 +1414,14 @@ void checkMoveInput() {
       else if (moveButtonState == LOW && highStable) {
         // Check how long it stayed HIGH
         if (millis() - highStartTime >= minActiveMs) {
-          totalMoves++;
-          uint8_t currentHour = rtc.now().hour();
-          if (isInShift1(currentHour)) shiftMove1++;
-          else if (isInShift2(currentHour)) shiftMove2++;
-          saveMovesToEEPROM();
+          // Check if engine running then increase moving
+          if (engineRunning) {
+            totalMoves++;
+            uint8_t currentHour = rtc.now().hour();
+            if (isInShift1(currentHour)) shiftMove1++;
+            else if (isInShift2(currentHour)) shiftMove2++;
+            saveMovesToEEPROM();
+          }//end check engingRunning
 
           isLifting = false;
           // digitalWrite(LED_PIN, HIGH);
