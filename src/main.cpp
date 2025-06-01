@@ -16,6 +16,23 @@
 #include <PubSubClient.h>
 // #include <ArduinoJson.h>
 
+// // Added on June 1,2025 -- To sync datetime with NTP server
+// #include <NTPClient.h>
+// #include <WiFiUdp.h>
+
+// WiFiUDP ntpUDP;
+// // By default 'pool.ntp.org' is used with 60 seconds update interval and
+// // no offset
+// NTPClient timeClient(ntpUDP);
+// // Variables to save date and time
+// String formattedDate;
+// String dayStamp;
+// String timeStamp;
+
+#include "time.h"
+const char* ntpServer = "pool.ntp.org";
+const long  gmtOffset_sec = 3600*7; // Example: +7 hour for Central European Time
+const int   daylightOffset_sec = 0; // Example: +1 hour for Daylight Saving Time
 
 BluetoothSerial SerialBT;
 
@@ -143,6 +160,9 @@ bool highStable = false;                // Track if HIGH was stable long enough
 unsigned long totalEngineMinutes = 0; // stores total runtime in minutes
 unsigned long lastMinuteUpdate = 0;
 
+// Wifi re-connect variable
+unsigned long wifi_previousMillis = 0;
+unsigned long wifi_interval = 30000;
 
 // Alert image
 const uint8_t image_check_engine[] PROGMEM = {
@@ -556,6 +576,28 @@ const uint8_t image_company[] PROGMEM = {
 
 void saveEngineHours();  // ✅ Add this prototype
 
+// Added on JUne 1,2025
+void synchroniseWith_NTP_Time(Stream &src) {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    src.println("Failed to obtain time");
+    return;
+  }
+
+
+  getLocalTime(&timeinfo);
+
+  uint32_t yr = timeinfo.tm_year + 1900;
+  uint32_t mt = timeinfo.tm_mon + 1;
+  uint32_t dy = timeinfo.tm_mday;
+  uint32_t hr = timeinfo.tm_hour;
+  uint32_t mi = timeinfo.tm_min;
+  uint32_t se = timeinfo.tm_sec;
+
+  rtc.adjust(DateTime(yr, mt, dy, hr, mi, se));
+  src.println("Sync time with NTP successful.");
+  src.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+}
 // Added on May 20,2025 -- To fix large of Hour
 void saveMinutesToEEPROM() {
   EEPROM.put(EEPROM_ADDR_TOTAL_MINUTES, totalEngineMinutes);
@@ -908,11 +950,11 @@ void updateDisplay(DateTime now,bool showNormalDisplay) {
     // Line 1: "Running" (if running) and engine name
     display.setTextSize(1);
     display.setCursor(0, 0);
-    if (engineRunning) display.print("Running");
+    if (engineRunning) display.print("Run");
 
     char timeStr[10];
-    sprintf(timeStr, "%02d:%02d", now.hour(), now.minute());
-    display.setCursor(55, 0);  // adjust X for alignment if needed
+    sprintf(timeStr, "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+    display.setCursor(35, 0);  // adjust X for alignment if needed
     display.print(timeStr);
 
     display.setCursor(96, 0);
@@ -1155,7 +1197,14 @@ void handleSerialCommand(String cmd, Stream &src) {
   }
   else if (cmd == "clear") clearEEPROM();
   else if (cmd == "time") show_time(src);
-  else if (cmd.startsWith("settime")) set_time(cmd);
+  else if (cmd.startsWith("settime")) {
+    String param = cmd.substring(8);
+    if (param.length() > 0) {
+      set_time(cmd);
+    } else{
+      synchroniseWith_NTP_Time(src);
+    }
+  }
   else if (cmd == "interval") {
     src.printf("Current save interval: %lu seconds\n", SAVE_INTERVAL / 1000UL);
   }
@@ -1170,7 +1219,7 @@ void handleSerialCommand(String cmd, Stream &src) {
       src.println("Invalid value. Use 1–86400 seconds.");
     }
   }
-  else if (cmd == "ip") {
+  else if (cmd == "wifi") {
     if (WiFi.status() == WL_CONNECTED) {
       src.println("📶 SSID: " + WiFi.SSID());
       src.println("🔗 Status: Connected");
@@ -1181,7 +1230,7 @@ void handleSerialCommand(String cmd, Stream &src) {
     }
   } //end cmd.startsWith("wifi")
   // 
-  else if (cmd.startsWith("setip")) {
+  else if (cmd.startsWith("setwifi")) {
     int firstSpace = cmd.indexOf(' ');
     int secondSpace = cmd.indexOf(' ', firstSpace + 1);
     if (firstSpace != -1 && secondSpace != -1) {
@@ -1202,7 +1251,7 @@ void handleSerialCommand(String cmd, Stream &src) {
     } else {
       src.println("Usage: setwifi SSID PASSWORD");
     }
-  } else if (cmd == "wifi") {
+  } else if (cmd == "wifi list") {
     src.println("Scanning Wi-Fi networks...");
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
@@ -1390,6 +1439,18 @@ void handleSerialCommand(String cmd, Stream &src) {
 
     // Load min active for Move
     loadMinActiveMs();
+
+    // // NTP datetime start
+    // timeClient.begin();
+    // // Set offset time in seconds to adjust for your timezone, for example:
+    // // GMT +1 = 3600
+    // // GMT +8 = 28800
+    // // GMT -1 = -3600
+    // // GMT 0 = 0
+    // timeClient.setTimeOffset(3600*7);//GMT+7
+    // Init and get time
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    synchroniseWith_NTP_Time(Serial);
   }
 
 // Counting Move
@@ -1439,6 +1500,19 @@ void checkMoveInput() {
 // End Counting Move
 
 void loop() {
+
+    // Reconnect Wifi.
+    unsigned long currentMillis = millis();
+    // if WiFi is down, try reconnecting every CHECK_WIFI_TIME seconds
+    if ((WiFi.status() != WL_CONNECTED) && (currentMillis - wifi_previousMillis >= wifi_interval)) {
+      // Serial.print(millis());
+      Serial.println("Reconnecting to WiFi...");
+      WiFi.disconnect();
+      WiFi.reconnect();
+      wifi_previousMillis = currentMillis;
+    }
+    // end reconnect wifi
+
     if (!rtcAvailable) {
       // showMessage("No Clock");
       showAlertScreen(image_clock_error,"Clock Error!");
