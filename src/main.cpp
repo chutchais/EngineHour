@@ -164,6 +164,12 @@ unsigned long lastMinuteUpdate = 0;
 unsigned long wifi_previousMillis = 0;
 unsigned long wifi_interval = 30000;
 
+
+// Buzzser
+#define BUZZER_PIN 13  // or any suitable GPIO
+unsigned long lastBuzzerToggle = 0;
+bool buzzerLogicState = true; // start HIGH (silent for active-LOW)
+
 // Alert image
 const uint8_t image_check_engine[] PROGMEM = {
 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
@@ -598,6 +604,22 @@ void synchroniseWith_NTP_Time(Stream &src) {
   src.println("Sync time with NTP successful.");
   src.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
 }
+
+void onBuzzer(bool on) {
+  if (!on) {
+    digitalWrite(BUZZER_PIN, HIGH);  // ensure buzzer is off
+    return;
+  }
+
+  if (millis() - lastBuzzerToggle >= 1000) {
+    buzzerLogicState = !buzzerLogicState;
+    digitalWrite(BUZZER_PIN, buzzerLogicState ? HIGH : LOW);  // active LOW logic
+    lastBuzzerToggle = millis();
+    Serial.print("On buzzer ");
+    Serial.print(buzzerLogicState);
+  }
+}
+
 // Added on May 20,2025 -- To fix large of Hour
 void saveMinutesToEEPROM() {
   EEPROM.put(EEPROM_ADDR_TOTAL_MINUTES, totalEngineMinutes);
@@ -1377,6 +1399,8 @@ void handleSerialCommand(String cmd, Stream &src) {
     pinMode(ENGINE_INPUT_PIN, INPUT_PULLUP); //for Hour
     pinMode(MOVE_INPUT_PIN, INPUT_PULLDOWN); //for move
     pinMode(CHECK_ENGINE_INPUT_PIN,INPUT_PULLDOWN);//for Display mode UP=Hour,DOWN=Move
+    pinMode(BUZZER_PIN, OUTPUT);
+    digitalWrite(BUZZER_PIN, HIGH);  // For active-LOW buzzer (OFF)
   
     EEPROM.begin(EEPROM_SIZE);
 
@@ -1531,8 +1555,10 @@ void loop() {
     // If fou d any problem , Display will change to Alert mode
     if(isCheckEngine || isPm || isChargeFail || isLifting){
       alertDisplay = true;
+      onBuzzer(true);
     }else{
       alertDisplay = false;
+      onBuzzer(false);
     }
 
     if (isCheckEngine){
