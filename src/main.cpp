@@ -1555,7 +1555,7 @@ void loop() {
       totalEngineMinutes++;
       totalEngineHours = totalEngineMinutes /60.0;
       // saveMinutesToEEPROM();
-      Serial.println("Minute logged: " + String(totalEngineMinutes));
+      // Serial.println("Minute logged: " + String(totalEngineMinutes));
       lastMinuteUpdate = millis();  // Reset timer
     }
 
