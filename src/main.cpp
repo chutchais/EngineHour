@@ -30,7 +30,7 @@
 // String timeStamp;
 
 #include "time.h"
-const char* ntpServer = "pool.ntp.org";
+const char* ntpServer = "bdc-lcb1.lcb1.com";//"pool.ntp.org";
 const long  gmtOffset_sec = 3600*7; // Example: +7 hour for Central European Time
 const int   daylightOffset_sec = 0; // Example: +1 hour for Daylight Saving Time
 
@@ -615,8 +615,6 @@ void onBuzzer(bool on) {
     buzzerLogicState = !buzzerLogicState;
     digitalWrite(BUZZER_PIN, buzzerLogicState ? HIGH : LOW);  // active LOW logic
     lastBuzzerToggle = millis();
-    Serial.print("On buzzer ");
-    Serial.print(buzzerLogicState);
   }
 }
 
@@ -1555,7 +1553,7 @@ void loop() {
     // If fou d any problem , Display will change to Alert mode
     if(isCheckEngine || isPm || isChargeFail || isLifting){
       alertDisplay = true;
-      onBuzzer(true);
+      if(isCheckEngine || isPm) onBuzzer(true);
     }else{
       alertDisplay = false;
       onBuzzer(false);
