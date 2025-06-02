@@ -30,9 +30,9 @@
 // String timeStamp;
 
 #include "time.h"
-const char* ntpServer = "bdc-lcb1.lcb1.com";//"pool.ntp.org";
-const long  gmtOffset_sec = 3600*7; // Example: +7 hour for Central European Time
-const int   daylightOffset_sec = 0; // Example: +1 hour for Daylight Saving Time
+char ntpServer[32] = "bdc-lcb1.lcb1.com";//"pool.ntp.org";
+// const long  gmtOffset_sec = 3600*7; // Example: +7 hour for Central European Time
+// const int   daylightOffset_sec = 0; // Example: +1 hour for Daylight Saving Time
 
 BluetoothSerial SerialBT;
 
@@ -169,6 +169,9 @@ unsigned long wifi_interval = 30000;
 #define BUZZER_PIN 13  // or any suitable GPIO
 unsigned long lastBuzzerToggle = 0;
 bool buzzerLogicState = true; // start HIGH (silent for active-LOW)
+
+// NTP server
+#define NTP_ADDR 320 //Keep NTP server
 
 // Alert image
 const uint8_t image_check_engine[] PROGMEM = {
@@ -584,9 +587,16 @@ void saveEngineHours();  // ✅ Add this prototype
 
 // Added on JUne 1,2025
 void synchroniseWith_NTP_Time(Stream &src) {
+  EEPROM.get(NTP_ADDR, ntpServer);
+  const long  gmtOffset_sec = 3600*7; // Example: +7 hour for Central European Time
+  const int   daylightOffset_sec = 0; // Example: +1 hour for Daylight Saving Time
+
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
-    src.println("Failed to obtain time");
+    src.println("Failed to obtain time from ");
+    src.print(ntpServer);
     return;
   }
 
@@ -656,6 +666,7 @@ void loadServerFromEEPROM() {
   buf[MAX_SERVER_LEN] = '\0';
   mqttServer = String(buf);
 }
+
 
 void connectWiFi() {
   char ssid[32], pass[32];
@@ -1371,14 +1382,28 @@ void handleSerialCommand(String cmd, Stream &src) {
 
       minActiveMs = newMs*1000;
       saveMinActiveMs();
-      Serial.print("✅ Set min active to ");
-      Serial.print(minActiveMs/1000);
-      Serial.println(" s");
+      src.print("✅ Set min active to ");
+      src.print(minActiveMs/1000);
+      src.println(" s");
 
     }
+  } else if (cmd.startsWith("ntp")) {
+    src.print("NPT Server : ");
+    src.println(ntpServer);
+
+  } else if (cmd.startsWith("setntp")) {
+      int firstSpace = cmd.indexOf(' ');
+    if (firstSpace != -1 ) {
+      String param = cmd.substring(firstSpace + 1);
+      param.toCharArray(ntpServer, 32);
+      EEPROM.put(NTP_ADDR, ntpServer);
+      EEPROM.commit();
+      src.print("NPT Server set to: ");
+      src.println(ntpServer);
+      synchroniseWith_NTP_Time(src);
   }
-  
-  
+}
+    
 }
 
   void setup() {
@@ -1471,7 +1496,8 @@ void handleSerialCommand(String cmd, Stream &src) {
     // // GMT 0 = 0
     // timeClient.setTimeOffset(3600*7);//GMT+7
     // Init and get time
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+
+    // configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
     synchroniseWith_NTP_Time(Serial);
   }
 
